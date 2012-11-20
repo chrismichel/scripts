@@ -10,10 +10,9 @@
 
 import os, sys, glob, commands, argparse, tempfile
 
-#sys.path.append('/home/vvoelz/scripts/simprota')
-sys.path.append('/Users/vince/scripts/simprota')
-
+sys.path.append('../../scripts')
 from Mol2File import *
+
 #from subprocess import call
 
 #Need to figure out naming scheme 
@@ -41,7 +40,7 @@ def run_cmd(cmd, Verbose=True):
     return
 
 
-def build_antechamber_from_mol2(Residue, CappingAtoms, CNTerm, Forcefield, NetCharge):
+def build_antechamber_from_mol2(Residue, CappingAtoms, CNTerm, Forcefield, NetCharge, HeadAtom='N', TailAtom='C'):
 
     #Tries to build a new mol2 with GAFF atom types, keeping the AM1-BCC charges from
     #the Chimera-made input *.mol2.
@@ -56,13 +55,7 @@ def build_antechamber_from_mol2(Residue, CappingAtoms, CNTerm, Forcefield, NetCh
     print 'resname = ', Residue
 
     nc = 0  # Nspe has net charge zero
-    if CNTerm=='C' or 'c':
-	 #If it is a c term residue, then the head (not the tail needs to be defined)
-	headatom=#Head Atom
 
-    else if CNTerm=='N' or 'n':
-	#If it is an n term residue, then the tail needs to be defined (not the head)
-	tail=#Tail Atom
     in_mol2 = '%s.mol2'%Residue
 
     out_mol2 = in_mol2.replace('.mol2','.gaff_edited.mol2')#Will be Residue.gaff.edited_mol2
@@ -79,7 +72,6 @@ def build_antechamber_from_mol2(Residue, CappingAtoms, CNTerm, Forcefield, NetCh
             command='antechamber -i %s -fi mol2 -o %s -fo mol2 -at gaff -nc %d -j 5'%(FileName, in_mol2, nc)
             run_cmd(command)
             #call([command])
-            
 
         else:
             # run antechanber to get a mol2 file with AMBER atomtypes and  BCC charges
@@ -119,7 +111,7 @@ def build_antechamber_from_mol2(Residue, CappingAtoms, CNTerm, Forcefield, NetCh
     print ResObject
 
 
-def tleap_residue_lines(res, CNTerm, capping_atoms):
+def tleap_residue_lines(res, CNTerm, capping_atoms, HeadAtom='N', TailAtom='C'):
     #Returns a string corresponding to the tleap lines needed to build a residue (i.e. remove the terminal caps, and specify connect points)
 
     res_mol2file = '%s.gaff_edited.mol2'%res
@@ -134,8 +126,10 @@ def tleap_residue_lines(res, CNTerm, capping_atoms):
     # Now built the terminal residue stuff using a similar scheme, with GAFF, etc as described in README; go ahead and try adding here as well.
     # %s = loadMol2 %s.gaff_edited.mol2\n%(res,res) Think this line is just a formatting issue
 
-    capping_indices = [ ResObject.get_atom_id_by_name(atomname) for atomname in capping_atoms] 
-
+    if CNTerm == 'B':
+        capping_indices = []  # ignore capping indices
+    else:
+        capping_indices = [ ResObject.get_atom_id_by_name(atomname) for atomname in capping_atoms] 
 
     leaptxt += "\n# Delete N-terminal acetyl and C-terminal dimethyl amine group\n"
     for i in range(len(capping_indices)): 
@@ -150,14 +144,14 @@ def tleap_residue_lines(res, CNTerm, capping_atoms):
 
     if (CNTerm == 'C') or (CNTerm == 'X'):
         leaptxt += '# Define head atom\n'
-        leaptxt += 'set %s head %s.1.%d\n'%(res,res,ResObject.get_atom_id_by_name('N'))
-        leaptxt += 'set %s.1 connect0 %s.1.%d\n'%(res,res,ResObject.get_atom_id_by_name('N'))
+        leaptxt += 'set %s head %s.1.%d\n'%(res,res,ResObject.get_atom_id_by_name(HeadAtom))
+        leaptxt += 'set %s.1 connect0 %s.1.%d\n'%(res,res,ResObject.get_atom_id_by_name(HeadAtom))
         leaptxt += '\n'
 
     if (CNTerm == 'N') or (CNTerm == 'X'):
         leaptxt += '# Define tail atom\n'
-        leaptxt += 'set %s tail %s.1.%d\n'%(res,res,ResObject.get_atom_id_by_name('C'))
-        leaptxt += 'set %s.1 connect1 %s.1.%d\n'%(res,res,ResObject.get_atom_id_by_name('C'))
+        leaptxt += 'set %s tail %s.1.%d\n'%(res,res,ResObject.get_atom_id_by_name(TailAtom))
+        leaptxt += 'set %s.1 connect1 %s.1.%d\n'%(res,res,ResObject.get_atom_id_by_name(TailAtom))
         leaptxt += '\n'
 
     leaptxt += 'savepdb %s %s.pdb\n\n\n'%(res,res)
@@ -179,11 +173,21 @@ if __name__ == "__main__":
 
 	parser.add_argument('Residue', action="store",help='Name the Resname.mol2 file')
 	parser.add_argument('CappingAtomsFile', action="store", help='Filename with the capping atoms')
-	parser.add_argument('CNTerm',action="store",choices='NCX', help='Specify N-term (N) C-term (C) or neither (X)')
+	parser.add_argument('CNTerm',action="store",choices='NCXB', help='Specify N-term (N), C-term (C), neither (X) or both (B, i.e. a complete moleculr that is not part of chain)')
 	parser.add_argument('Forcefield',action="store",help='Specify the GAFF forcefield (G) or the Amber forcefield (A)')
 	parser.add_argument('NetCharge',action="store",type=float,help='Specify the net charge of the residue')
 	#Residue, CappingAtoms, CNTerm, Forcefield, NetCharge
+
+        parser.add_argument('-s', dest='HeadAtom', help='Name of head atom for connecting residues',
+        default='N')
+        parser.add_argument('-t', dest='TailAtom', help='Name of tail atom for connecting residues',
+        default='C')
+
+        #parser.add_argument('--HeadAtom', action='store_const', const='N', default='N')
+        #parser.add_argument('--TailAtom', action='store_const', const='C', default='C')
+
 	args =  parser.parse_args(namespace=p)
+
         #>>> parser = argparse.ArgumentParser()
         #>>> parser.add_argument('--foo')
         #>>> parser.parse_args(args=['--foo', 'BAR'], namespace=c)
@@ -191,11 +195,14 @@ if __name__ == "__main__":
         #'BAR'
 
         # read in cappinhg atoms from file
-        fin = open(p.CappingAtomsFile, 'r')
-        CappingAtoms = fin.read().strip().split()
-        fin.close()
+        if p.CNTerm == 'B':
+            CappingAtoms = [] # ignore capping atoms file if we are building a complete molecule with no caps
+        else:
+            fin = open(p.CappingAtomsFile, 'r')
+            CappingAtoms = fin.read().strip().split()
+            fin.close()
 
-	build_antechamber_from_mol2(p.Residue,CappingAtoms,p.CNTerm,p.Forcefield,p.NetCharge)
+	build_antechamber_from_mol2(p.Residue, CappingAtoms, p.CNTerm, p.Forcefield, p.NetCharge, HeadAtom=p.HeadAtom, TailAtom=p.TailAtom)
     
 
     #mol2files = glob.glob('residues/*.mol2')
@@ -319,8 +326,7 @@ NONBON
 	leapscript += '\n'
 
     # add lines to build each residue
-	leapscript += tleap_residue_lines(p.Residue, p.CNTerm, CappingAtoms)
-
+	leapscript += tleap_residue_lines(p.Residue, p.CNTerm, CappingAtoms, HeadAtom=p.HeadAtom, TailAtom=p.TailAtom)
 	leapscript += "# Make a list of info needed for the library\n"
 	leapscript += "# This is necessary in order to make sure the parameter modifications are stored to the off file.\n"
     #leapscript += "loadoff NDM.off\n"  # NOTE the N-dimethyl residue *.off file must be built already!
